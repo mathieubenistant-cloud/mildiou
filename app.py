@@ -12,16 +12,44 @@ st.title("Risque mildiou oignon — Observé + Prévision")
 BASE = "https://api.sencrop.com/v1"
 TZ = "Europe/Paris"
 
-def get_secret(key: str, env_fallback: str | None = None) -> str:
+# -----------------------------
+# Secrets
+# -----------------------------
+def get_secret(key: str, env_fallback: str | None = None, default: str | None = None) -> str | None:
     if key in st.secrets:
         return str(st.secrets[key]).strip()
     if env_fallback and env_fallback in os.environ:
         return os.environ[env_fallback].strip()
-    raise KeyError(f"Secret manquant: {key}")
+    return default
 
 APPLICATION_ID = get_secret("SENCROP_APPLICATION_ID", "SENCROP_APPLICATION_ID")
 APPLICATION_SECRET = get_secret("SENCROP_APPLICATION_SECRET", "SENCROP_APPLICATION_SECRET")
+if not APPLICATION_ID or not APPLICATION_SECRET:
+    st.error("Secrets manquants: SENCROP_APPLICATION_ID / SENCROP_APPLICATION_SECRET")
+    st.stop()
 
+# ✅ Allowlist de stations (IDs séparés par virgule)
+# Streamlit Cloud > Settings > Secrets :
+# DEVICE_ALLOWLIST = "46431, 12345"
+DEVICE_ALLOWLIST = get_secret("DEVICE_ALLOWLIST", "DEVICE_ALLOWLIST", default="")
+
+def parse_allowlist(s: str) -> set[int]:
+    out = set()
+    for part in (s or "").split(","):
+        part = part.strip()
+        if not part:
+            continue
+        try:
+            out.add(int(part))
+        except ValueError:
+            pass
+    return out
+
+ALLOW_IDS = parse_allowlist(DEVICE_ALLOWLIST)
+
+# -----------------------------
+# HTTP helpers
+# -----------------------------
 def must(r: requests.Response) -> requests.Response:
     if r.status_code >= 400:
         raise requests.HTTPError(f"HTTP {r.status_code} for {r.url}: {r.text[:800]}")
@@ -57,6 +85,9 @@ def resolve_user_id(me_payload: dict) -> int:
         raise ValueError("Impossible de déterminer USER_ID depuis /me")
     return int(user_id)
 
+# -----------------------------
+# Mildiou helpers
+# -----------------------------
 def dew_point_c(temp_c, rh_pct):
     a, b = 17.62, 243.12
     rh = np.clip(rh_pct, 1, 100) / 100.0
@@ -117,13 +148,12 @@ def openmeteo_forecast(lat: float, lon: float, days: int, model: str) -> pd.Data
     j = r.json()
     h = j["hourly"]
     tloc = pd.to_datetime(h["time"]).tz_localize(TZ)
-    df_fc = pd.DataFrame({
+    return pd.DataFrame({
         "time": tloc.tz_convert("UTC"),
         "temp_c": h["temperature_2m"],
         "rh_pct": h["relative_humidity_2m"],
         "rain_mm": h["precipitation"],
     })
-    return df_fc
 
 def compute_ep_onion(df_in: pd.DataFrame,
                      rh_wet: float = 88.0,
@@ -234,7 +264,21 @@ def make_mobile_plot(df2_obs, df2_fc, ep_obs, ep_fc, model_name: str):
     add_points(ep_obs, "Observé")
     add_points(ep_fc, "Prévision")
 
+    # now vertical
     fig.add_vline(x=now_local, line_dash="dash")
+
+    # ✅ seuils (lignes visibles via shapes)
+    fig.add_shape(type="line", xref="paper", x0=0, x1=1, yref="y", y0=60, y1=60,
+                  line=dict(color="orange", width=1, dash="dot"))
+    fig.add_annotation(xref="paper", x=0.01, yref="y", y=60, text="Pré-alerte (60)",
+                       showarrow=False, font=dict(color="orange", size=12),
+                       bgcolor="rgba(255,255,255,0.6)", xanchor="left", yanchor="bottom")
+
+    fig.add_shape(type="line", xref="paper", x0=0, x1=1, yref="y", y0=70, y1=70,
+                  line=dict(color="red", width=1, dash="dot"))
+    fig.add_annotation(xref="paper", x=0.01, yref="y", y=70, text="Alerte (70)",
+                       showarrow=False, font=dict(color="red", size=12),
+                       bgcolor="rgba(255,255,255,0.6)", xanchor="left", yanchor="bottom")
 
     fig.update_layout(
         title=f"Risque mildiou oignon — Observé + Prévision ({model_name})",
@@ -248,15 +292,22 @@ def make_mobile_plot(df2_obs, df2_fc, ep_obs, ep_fc, model_name: str):
     )
     return fig
 
+# -----------------------------
+# Sidebar
+# -----------------------------
 with st.sidebar:
     st.header("Paramètres")
     obs_days = st.slider("Historique Sencrop (jours)", 1, 15, 7)
     fc_days = st.slider("Prévision (jours)", 1, 10, 7)
     model = st.selectbox("Modèle météo", ["icon_eu", "icon"], index=0)
+    st.caption("Allowlist possible via secret DEVICE_ALLOWLIST.")
     if st.button("Rafraîchir maintenant"):
         st.cache_data.clear()
         st.rerun()
 
+# -----------------------------
+# Main
+# -----------------------------
 try:
     tok = sencrop_token(APPLICATION_ID, APPLICATION_SECRET)
     me = sencrop_me(tok)
@@ -268,15 +319,20 @@ try:
 
     options = []
     id_to_meta = {}
+
     for did in items:
+        did_int = int(did)
+        if ALLOW_IDS and did_int not in ALLOW_IDS:
+            continue
+
         d = devs.get(str(did), devs.get(did, {})) if isinstance(devs, dict) else {}
         name = ((d.get("contents") or {}).get("name")) if isinstance(d, dict) else None
-        label = f"{name or 'Station'} — {did}"
+        label = f"{name or 'Station'} — {did_int}"
         options.append(label)
-        id_to_meta[label] = {"id": int(did), "raw": d}
+        id_to_meta[label] = {"id": did_int, "raw": d}
 
     if not options:
-        st.error("Aucune station trouvée via /users/{USER_ID}/devices.")
+        st.error("Aucune station trouvée. Vérifie DEVICE_ALLOWLIST dans Secrets.")
         st.stop()
 
     sel = st.selectbox("Station", options=options, index=0)
@@ -287,16 +343,10 @@ try:
     lat = loc.get("latitude")
     lon = loc.get("longitude")
 
-    colA, colB = st.columns([2, 1])
-    with colB:
-        st.subheader("Station")
-        st.write(f"**DEVICE_ID**: {device_id}")
-        if lat is None or lon is None:
-            st.warning("Coordonnées absentes côté Sencrop. Renseigne-les :")
-            lat = st.number_input("Latitude", value=48.856600, format="%.6f")
-            lon = st.number_input("Longitude", value=2.352200, format="%.6f")
-        else:
-            st.write(f"**Lat/Lon**: {lat}, {lon}")
+    if lat is None or lon is None:
+        st.warning("Coordonnées absentes côté Sencrop. Renseigne-les :")
+        lat = st.number_input("Latitude", value=48.856600, format="%.6f")
+        lon = st.number_input("Longitude", value=2.352200, format="%.6f")
 
     with st.spinner("Récupération observé (Sencrop) + calcul risque..."):
         df_obs = sencrop_hourly(tok, user_id, device_id, obs_days)
@@ -309,36 +359,7 @@ try:
         df2_fc, ep_fc = compute_ep_onion(df_fc_future)
 
     fig = make_mobile_plot(df2_obs, df2_fc, ep_obs, ep_fc, model)
-
-    with colA:
-        st.plotly_chart(fig, use_container_width=True)
-
-        st.subheader("Résumé")
-        if ep_fc is not None and not ep_fc.empty:
-            nxt = ep_fc[ep_fc["mildiou_score"] >= 60].sort_values("start").head(1)
-            if not nxt.empty:
-                row = nxt.iloc[0]
-                st.warning(f"Prochain épisode ≥ 60 prévu le **{row['start'].strftime('%d/%m %Hh')}** (score **{int(row['mildiou_score'])}**).")
-            else:
-                st.success("Aucun épisode ≥ 60 détecté dans la fenêtre de prévision.")
-        else:
-            st.success("Aucun épisode ≥ 60 détecté dans la fenêtre de prévision.")
-
-        tab1, tab2, tab3 = st.tabs(["Épisodes observés", "Épisodes prévus", "Données horaires (aperçu)"])
-        with tab1:
-            if ep_obs is None or ep_obs.empty:
-                st.info("Aucun épisode observé.")
-            else:
-                st.dataframe(ep_obs[["start","end","duration_h","required_h","mildiou_score","statut","t_mean","rh_mean","dpd_mean","rain_sum"]].tail(50),
-                             use_container_width=True)
-        with tab2:
-            if ep_fc is None or ep_fc.empty:
-                st.info("Aucun épisode prévu.")
-            else:
-                st.dataframe(ep_fc[["start","end","duration_h","required_h","mildiou_score","statut","t_mean","rh_mean","dpd_mean","rain_sum"]].head(50),
-                             use_container_width=True)
-        with tab3:
-            st.dataframe(df_obs.tail(72), use_container_width=True)
+    st.plotly_chart(fig, use_container_width=True)
 
 except Exception as e:
     st.error("Erreur pendant l'exécution.")
