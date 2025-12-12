@@ -236,28 +236,6 @@ def make_mobile_plot(df2_obs, df2_fc, ep_obs, ep_fc, model_name: str):
 
     fig.add_vline(x=now_local, line_dash="dash")
 
-    # Seuils de risque
-    fig.add_hline(
-    y=60,
-    line_dash="dot",
-    line_color="orange",
-    annotation_text="Pré-alerte (60)",
-    annotation_position="top left",
-    annotation_font_size=12,
-    opacity=0.7
-    )
-
-    fig.add_hline(
-    y=70,
-    line_dash="dot",
-    line_color="red",
-    annotation_text="Alerte (70)",
-    annotation_position="top left",
-    annotation_font_size=12,
-    opacity=0.7
-    )
-
-    
     fig.update_layout(
         title=f"Risque mildiou oignon — Observé + Prévision ({model_name})",
         xaxis_title="Date",
