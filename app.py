@@ -1,3 +1,8 @@
+# =========================================================
+# APP MILDIU OIGNON — VERSION STABLE / PATCHÉE
+# Compatible Streamlit Cloud (store persistant partiel)
+# =========================================================
+
 import os
 import requests
 import numpy as np
@@ -133,7 +138,7 @@ def openmeteo_forecast(lat, lon, days, model):
     })
 
 # =========================================================
-# BIAS CORRECTION (SAFE)
+# STORAGE + BIAS (SAFE STREAMLIT CLOUD)
 # =========================================================
 STORE = Path("store")
 STORE.mkdir(exist_ok=True)
@@ -141,14 +146,14 @@ FC_STORE = STORE / "forecast_snapshots.csv"
 OBS_STORE = STORE / "obs_hourly.csv"
 
 def append_obs(df, device_id):
-    if df.empty:
+    if df is None or df.empty:
         return
     d = df.copy()
     d["device_id"] = device_id
     d.to_csv(OBS_STORE, mode="a", header=not OBS_STORE.exists(), index=False)
 
 def append_fc(df, device_id, model):
-    if df.empty:
+    if df is None or df.empty:
         return
     d = df.copy()
     d["issued_at"] = pd.Timestamp.now(tz="UTC")
@@ -158,25 +163,31 @@ def append_fc(df, device_id, model):
 
 def compute_bias(device_id, model):
     if not FC_STORE.exists() or not OBS_STORE.exists():
-        return {"T": (1, 0), "RH": (1, 0), "R": 1}
+        return {"T": (1.0, 0.0), "RH": (1.0, 0.0), "R": 1.0}
 
-    fc = pd.read_csv(FC_STORE, parse_dates=["time", "issued_at"])
-    obs = pd.read_csv(OBS_STORE, parse_dates=["time"])
+    fc = pd.read_csv(FC_STORE)
+    if "issued_at" not in fc.columns:
+        return {"T": (1.0, 0.0), "RH": (1.0, 0.0), "R": 1.0}
+
+    fc["issued_at"] = pd.to_datetime(fc["issued_at"], errors="coerce", utc=True)
+    fc["time"] = pd.to_datetime(fc["time"], errors="coerce", utc=True)
+
+    obs = pd.read_csv(OBS_STORE)
+    obs["time"] = pd.to_datetime(obs["time"], errors="coerce", utc=True)
 
     fc = fc[(fc.device_id == device_id) & (fc.model == model)]
     obs = obs[obs.device_id == device_id]
 
     m = fc.merge(obs, on="time", suffixes=("_fc", "_obs"))
     if len(m) < 48:
-        return {"T": (1, 0), "RH": (1, 0), "R": 1}
+        return {"T": (1.0, 0.0), "RH": (1.0, 0.0), "R": 1.0}
 
     aT, bT = np.polyfit(m.temp_c_fc, m.temp_c_obs, 1)
     aRH, bRH = np.polyfit(m.rh_pct_fc, m.rh_pct_obs, 1)
 
-    aRH = np.clip(aRH, 0.7, 1.3)
-    bRH = np.clip(bRH, -15, 15)
-
-    kR = np.clip(m.rain_mm_obs.sum() / max(m.rain_mm_fc.sum(), 0.1), 0.2, 5)
+    aRH = float(np.clip(aRH, 0.7, 1.3))
+    bRH = float(np.clip(bRH, -15, 15))
+    kR = float(np.clip(m.rain_mm_obs.sum() / max(m.rain_mm_fc.sum(), 0.1), 0.2, 5))
 
     return {"T": (aT, bT), "RH": (aRH, bRH), "R": kR}
 
@@ -210,7 +221,7 @@ def compute_ep(df):
     return df, ep
 
 # =========================================================
-# APP
+# MAIN APP
 # =========================================================
 try:
     tok = sencrop_token(APPLICATION_ID, APPLICATION_SECRET)
@@ -218,17 +229,18 @@ try:
     user_id = list(me["users"].keys())[0]
     devs = sencrop_devices(tok, user_id)
 
-    choices = []
+    devices = []
     meta = {}
     for d in devs.get("items", []):
         did = int(d)
         if ALLOW_IDS and did not in ALLOW_IDS:
             continue
-        choices.append(str(did))
+        devices.append(str(did))
         meta[str(did)] = devs["devices"][str(d)]
 
-    device = st.selectbox("Station", choices)
+    device = st.selectbox("Station", devices)
     device_id = int(device)
+
     loc = meta[device].get("location", {})
     lat, lon = loc.get("latitude"), loc.get("longitude")
 
@@ -253,15 +265,9 @@ try:
 
     df_fc2, ep_fc = compute_ep(df_fc[df_fc.time >= pd.Timestamp.now(tz="UTC")])
 
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(x=df_obs2.time, y=df_obs2.rh_pct, name="RH obs"))
-    fig.add_trace(go.Scatter(x=df_fc2.time, y=df_fc2.rh_pct, name="RH prev corr"))
-    st.plotly_chart(fig, use_container_width=True)
-
     st.subheader("Épisodes prévus")
     st.dataframe(ep_fc)
 
 except Exception as e:
     st.error("Erreur d'exécution")
     st.exception(e)
-
