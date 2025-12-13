@@ -695,30 +695,30 @@ try:
                             view = view.sort_values("time")
 
                          def _color_abs_err(v):
-    import numpy as np
-    import pandas as pd
+                            import numpy as np
+                            import pandas as pd
 
-    # Cas valeur manquante → pas de style
-    if v is None or (isinstance(v, float) and np.isnan(v)) or pd.isna(v):
-        return ""
+                            # Cas valeur manquante → pas de style
+                             if v is None or (isinstance(v, float) and np.isnan(v)) or pd.isna(v):
+                               return ""
 
-    # Conversion sécurisée
-    try:
-        v = float(v)
-    except Exception:
-        return ""
+                            # Conversion sécurisée
+                                try:
+                                v = float(v)
+                                 except Exception:
+                                return ""
 
-    if not np.isfinite(v):
-        return ""
+                                if not np.isfinite(v):
+                                return ""
 
-    # Clamp 0..1
-    v = max(0.0, min(1.0, v))
+                                # Clamp 0..1
+                                  v = max(0.0, min(1.0, v))
 
-    r = int(220 + (255 - 220) * v)
-    g = int(245 - (245 - 120) * v)
-    b = int(245 - (245 - 120) * v)
+                                  r = int(220 + (255 - 220) * v)
+                                   g = int(245 - (245 - 120) * v)
+                                   b = int(245 - (245 - 120) * v)
 
-    return f"background-color: rgb({r},{g},{b});"
+                                return f"background-color: rgb({r},{g},{b});"
 
                             styler = view.style.format({
                                 "temp_obs":"{:.1f}","temp_raw":"{:.1f}","temp_corr":"{:.1f}",
