@@ -261,6 +261,11 @@ def compute_bias_coeffs(device_id: int, model: str, window_days: int = 30, lead_
 
     aT, bT = _fit_linear(merged["temp_fc"], merged["temp_obs"])
     aRH, bRH = _fit_linear(merged["rh_fc"], merged["rh_obs"])
+
+# garde-fous physiques
+    aRH = float(np.clip(aRH, 0.7, 1.3))
+    bRH = float(np.clip(bRH, -15.0, 15.0))
+
     kR = _fit_rain_multiplier(merged["rain_fc"], merged["rain_obs"])
 
     return {"T": {"a": aT, "b": bT}, "RH": {"a": aRH, "b": bRH}, "R": {"k": kR}}
@@ -271,7 +276,7 @@ def apply_bias_to_forecast(df_fc: pd.DataFrame, coeffs: dict) -> pd.DataFrame:
     out = df_fc.copy()
     out["temp_c"] = coeffs["T"]["a"] * out["temp_c"] + coeffs["T"]["b"]
     out["rh_pct"] = coeffs["RH"]["a"] * out["rh_pct"] + coeffs["RH"]["b"]
-    out["rh_pct"] = out["rh_pct"].clip(0, 100)
+    out["rh_pct"] = out["rh_pct"].clip(lower=40, upper=100)
     out["rain_mm"] = (coeffs["R"]["k"] * out["rain_mm"]).clip(lower=0)
     return out
 
