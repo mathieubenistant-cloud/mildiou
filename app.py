@@ -689,20 +689,26 @@ try:
                             view = m[show_cols].copy()
                             view = view.sort_values("time")
 
-                            def _color_abs_err(s, cap):
-                                # s is a Series of errors
-                                a = s.abs()
-                                # normalize to 0..1 with cap
-                                n = (a / cap).clip(0, 1)
-                                # Green (small) -> Red (large) using simple RGB interpolation
-                                # 0 => (220,255,220), 1 => (255,220,220)
-                                colors = []
-                                for v in n.to_numpy():
-                                    r = int(220 + (255-220)*v)
-                                    g = int(255 - (255-220)*v)
-                                    b = int(220)
-                                    colors.append(f"background-color: rgb({r},{g},{b})")
-                                return colors
+                            def _color_abs_err(v):
+    # v est censé être un ratio 0..1 mais peut être NaN
+                            if v is None or (isinstance(v, float) and np.isnan(v)) or (hasattr(pd, "isna") and pd.isna(v)):
+                                return ""  # pas de style si valeur manquante
+
+    # garde-fous
+                            try:
+                              v = float(v)
+                            except Exception:
+                               return ""
+
+                            if not np.isfinite(v):
+                                return ""
+
+                               v = max(0.0, min(1.0, v))  # clamp 0..1
+
+                                r = int(220 + (255 - 220) * v)
+                                g = int(245 - (245 - 120) * v)
+                                b = int(245 - (245 - 120) * v)
+                                    return f"background-color: rgb({r},{g},{b});"
 
                             styler = view.style.format({
                                 "temp_obs":"{:.1f}","temp_raw":"{:.1f}","temp_corr":"{:.1f}",
