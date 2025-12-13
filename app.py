@@ -695,7 +695,7 @@ try:
                             view = view.sort_values("time")
 
                             def _color_abs_err(v):
-    # v est censé être un ratio 0..1 mais peut être NaN
+                                
                             if v is None or (isinstance(v, float) and np.isnan(v)) or (hasattr(pd, "isna") and pd.isna(v)):
                                 return ""  # pas de style si valeur manquante
 
