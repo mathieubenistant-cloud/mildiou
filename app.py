@@ -7,6 +7,24 @@ import plotly.graph_objects as go
 from datetime import datetime, timezone
 from pathlib import Path
 
+def color_abs_err_safe(s, cap):
+    a = s.abs()
+    n = (a / cap).clip(0, 1)
+
+    colors = []
+    for v in n.to_numpy():
+        if v is None or not np.isfinite(v):
+            colors.append("")
+            continue
+
+        v = float(v)
+        r = int(220 + (255 - 220) * v)
+        g = int(255 - (255 - 220) * v)
+        b = 220
+        colors.append(f"background-color: rgb({r},{g},{b})")
+
+    return colors
+
 # =========================================================
 # CONFIG UI
 # =========================================================
