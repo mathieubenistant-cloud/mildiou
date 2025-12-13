@@ -694,26 +694,31 @@ try:
                             view = m[show_cols].copy()
                             view = view.sort_values("time")
 
-                            def _color_abs_err(v):
-                                
-                            if v is None or (isinstance(v, float) and np.isnan(v)) or (hasattr(pd, "isna") and pd.isna(v)):
-                                return ""  # pas de style si valeur manquante
+                         def _color_abs_err(v):
+    import numpy as np
+    import pandas as pd
 
-    # garde-fous
-                            try:
-                              v = float(v)
-                            except Exception:
-                               return ""
+    # Cas valeur manquante → pas de style
+    if v is None or (isinstance(v, float) and np.isnan(v)) or pd.isna(v):
+        return ""
 
-                            if not np.isfinite(v):
-                                return ""
+    # Conversion sécurisée
+    try:
+        v = float(v)
+    except Exception:
+        return ""
 
-                               v = max(0.0, min(1.0, v))  # clamp 0..1
+    if not np.isfinite(v):
+        return ""
 
-                                r = int(220 + (255 - 220) * v)
-                                g = int(245 - (245 - 120) * v)
-                                b = int(245 - (245 - 120) * v)
-                                    return f"background-color: rgb({r},{g},{b});"
+    # Clamp 0..1
+    v = max(0.0, min(1.0, v))
+
+    r = int(220 + (255 - 220) * v)
+    g = int(245 - (245 - 120) * v)
+    b = int(245 - (245 - 120) * v)
+
+    return f"background-color: rgb({r},{g},{b});"
 
                             styler = view.style.format({
                                 "temp_obs":"{:.1f}","temp_raw":"{:.1f}","temp_corr":"{:.1f}",
